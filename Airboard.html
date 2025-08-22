@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CamMouse — Control con la mano</title>
+  <style>
+    :root { --bg:#0f1115; --panel:#171a21; --accent:#ff7a1a; --text:#e8eaf1; --muted:#9aa3b2; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 800px at 80% -10%,#1b1f2a 0%,var(--bg) 60%);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial;overflow:hidden}
+
+    .app{display:grid;grid-template-columns:340px 1fr;grid-template-rows:0 1fr;grid-template-areas:"header header" "sidebar main";height:100vh;gap:12px;padding:12px;transition:grid-template-columns .25s ease}.app.collapsed{grid-template-columns:0 1fr}
+    .app.collapsed{grid-template-columns:0 1fr}
+
+    header{grid-area:header;height:0;padding:0;border:0;overflow:hidden}
+    header h1{font-size:16px;font-weight:700;letter-spacing:.2px;margin:0}
+    header .sub{color:var(--muted);font-size:12px}
+
+    .sidebar{grid-area:sidebar;background:linear-gradient(180deg,#141821,#10131a);border:1px solid #1f2434;border-radius:16px;padding:16px;display:grid;align-content:start;gap:14px;overflow:hidden}
+    .sidebar.hidden{width:0;padding:0;border:none}
+
+    .panel{background:#0f131b;border:1px solid #1b2030;border-radius:14px;padding:14px}
+    .row{display:flex;align-items:center;gap:10px}
+    .row+.row{margin-top:10px}
+    label{font-size:12px;color:var(--muted)}
+    input[type="range"]{width:100%}
+
+    .btn{appearance:none;border:none;cursor:pointer;background:var(--accent);color:#111;font-weight:700;padding:10px 14px;border-radius:10px;transition:transform .05s ease,filter .2s ease,box-shadow .2s ease;box-shadow:0 6px 20px rgba(255,122,26,.25)}
+    .btn:active{transform:translateY(1px) scale(.99)}
+    .ghost{background:#151a25;color:#e5e7ee;border:1px solid #20273a;box-shadow:none;font-weight:600}
+
+    main{grid-area:main;position:relative;background:#0d1117;border:1px solid #191f2d;border-radius:16px;overflow:hidden}
+
+    /* Botón flotante para plegar/expandir sidebar */
+    #toggleSidebar{position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:5;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.08);color:#e8eaf1;border-radius:10px;padding:8px 10px;cursor:pointer;backdrop-filter:blur(6px)}
+
+    /* Video y canvas */
+    #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#000;transform:scaleX(-1)} /* espejo SIEMPRE */
+    #stage{position:absolute;inset:0;width:100%;height:100%;display:block;background:transparent;z-index:1;pointer-events:none}
+    #overlay{position:absolute;inset:0;pointer-events:none;z-index:2}
+
+    /* Cursor controlado por la mano */
+    #cursor{position:absolute;width:28px;height:28px;border-radius:50%;backdrop-filter:blur(6px);background:radial-gradient(circle at 35% 35%, rgba(255,255,255,.9), rgba(255,255,255,.1));border:2px solid rgba(255,255,255,.35);box-shadow:0 6px 20px rgba(255,122,26,.3);transform:translate(-50%,-50%);pointer-events:none;z-index:3}
+    #cursor.clicking{animation:pulse .25s ease;border-color:var(--accent);box-shadow:0 0 0 6px rgba(255,122,26,.2)}
+    @keyframes pulse{0%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(.85)}100%{transform:translate(-50%,-50%) scale(1)}}
+
+    /* Controles inferiores: botones circulares */
+    #bottomControls{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:14px;z-index:8}
+    .fab{width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;display:grid;place-items:center;background:var(--accent);color:#111;box-shadow:0 10px 30px rgba(255,122,26,.35);transition:transform .06s ease, box-shadow .2s ease}
+    .fab:active{transform:translateY(1px) scale(.98)}
+    .fab.ghost{background:#1b2230;color:#e8eaf1;border:1px solid #2a3347;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+    .fab.active{outline:3px solid rgba(255,122,26,.35)}
+    .fab svg{width:28px;height:28px;display:block}
+    #cursor.clicking{animation:pulse .25s ease;border-color:var(--accent);box-shadow:0 0 0 6px rgba(255,122,26,.2)}
+    @keyframes pulse{0%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(.85)}100%{transform:translate(-50%,-50%) scale(1)}}
+      /* Toggle switch (ON/OFF) */
+    .toggle{display:inline-flex;gap:8px;align-items:center;cursor:pointer}
+    .toggle input{appearance:none;width:42px;height:26px;border-radius:26px;background:#202639;position:relative;outline:none;transition:background .2s ease;border:1px solid #2a3147}
+    .toggle input::after{content:"";position:absolute;width:20px;height:20px;border-radius:50%;background:#c7cede;top:2px;left:2px;transition:transform .2s ease}
+    .toggle input:checked{background:#2b334a}
+    .toggle input:checked::after{transform:translateX(16px);background:var(--accent)}
+
+    /* Cursor negro cuando la pizarra está ON */
+    body.whiteboard-on #cursor{background:radial-gradient(circle at 35% 35%, rgba(0,0,0,.9), rgba(0,0,0,.2));border:2px solid rgba(0,0,0,.6);box-shadow:0 6px 20px rgba(0,0,0,.15)}
+    body.whiteboard-on #cursor.clicking{border-color:#000;box-shadow:0 0 0 6px rgba(0,0,0,.15)}
+  </style>
+</head>
+<body>
+  <div class="app collapsed" id="app">
+    <header>
+      <div>
+        <h1>CamMouse</h1>
+        <div class="sub">Índice = cursor • Pellizco = clic • Vista espejo siempre ON</div>
+      </div>
+      </header>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="panel">
+        <div class="row" style="justify-content:space-between"><label>Suavizado del cursor</label><span id="smoothVal">0.60</span></div>
+        <input id="smooth" type="range" min="0" max="0.95" step="0.01" value="0.60" />
+        <div class="row" style="justify-content:space-between;margin-top:12px"><label>Umbral de pellizco</label><span id="pinchVal">0.030</span></div>
+        <input id="pinch" type="range" min="0.02" max="0.12" step="0.001" value="0.030" />
+      </div>
+
+      <div class="panel">
+        <label class="toggle"><input id="drawToggle" type="checkbox" /><span>Dibujar al pellizcar</span></label>
+        <div class="row" style="justify-content:space-between;margin-top:10px"><label>Color de trazo</label><input id="colorPicker" type="color" value="#ff7a1a" style="width:48px;height:28px;border:none;background:transparent;cursor:pointer" /></div>
+        <div class="row" style="justify-content:space-between;margin-top:10px"><label>Grosor</label><span id="widthVal">10</span></div>
+        <input id="widthRange" type="range" min="1" max="24" step="1" value="10" />
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button id="undoBtn" class="btn ghost" style="flex:1">↶ Deshacer</button>
+          <button id="clearBtn" class="btn ghost" style="flex:1">🧽 Limpiar</button>
+        </div>
+      </div>
+
+      <div class="panel" style="font-size:13px;color:var(--muted)">
+        <b>Tips</b>
+        <ul>
+          <li>Índice = cursor. Pellizco = clic. Mantener = dibujar.</li>
+          <li>Usá buena luz frontal para mejor tracking.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <main>
+      <button id="toggleSidebar" title="Mostrar/ocultar panel">☰</button>
+      <div id="bottomControls">
+        <button id="startFab" class="fab" title="Iniciar cámara" aria-label="Iniciar cámara">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="3" ry="3"/>
+          </svg>
+        </button>
+        <button id="whiteboardFab" class="fab" title="Pizarra" aria-label="Pizarra">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="12" rx="2" ry="2"/>
+            <path d="M7 20l2-4m6 4l-2-4m-6 0h12"/>
+          </svg>
+        </button>
+      </div>
+      <video id="video" playsinline></video>
+      <canvas id="stage"></canvas>
+      <canvas id="overlay"></canvas>
+      <div id="cursor"></div>
+    </main>
+  </div>
+
+  <!-- MediaPipe Hands (CDN oficial) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // === CamMouse — Script corregido ===
+    const app = document.getElementById('app');
+    const sidebar = document.getElementById('sidebar');
+    const toggleSidebarBtn = document.getElementById('toggleSidebar');
+
+    const video = document.getElementById('video');
+    const stage = document.getElementById('stage');
+    const overlay = document.getElementById('overlay');
+    const octx = overlay.getContext('2d');
+    const sctx = stage.getContext('2d');
+    const cursor = document.getElementById('cursor');
+
+    const smoothR = document.getElementById('smooth');
+    const pinchR = document.getElementById('pinch');
+    const smoothVal = document.getElementById('smoothVal');
+    const pinchVal = document.getElementById('pinchVal');
+    const drawToggle = document.getElementById('drawToggle');
+    const clearBtn = document.getElementById('clearBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const colorPicker = document.getElementById('colorPicker');
+    const widthRange = document.getElementById('widthRange');
+    const widthVal = document.getElementById('widthVal');
+    const startFab = document.getElementById('startFab');
+    const whiteboardFab = document.getElementById('whiteboardFab');
+
+    let cam; let running = false;
+    let lastX = null, lastY = null; // cursor suavizado
+    let pinchDown = false;          // estado de pellizco
+    let currentStroke = null;       // trazo en curso
+    const strokes = [];             // lista de trazos ({color,width,points:[{x,y}]})
+
+    const MIRROR = true;            // espejo SIEMPRE
+    let drawColor = '#ff7a1a';
+    let drawWidth = 10;
+    let whiteboard = false;
+
+    function fitCanvases(){
+      const { clientWidth:w, clientHeight:h } = stage.parentElement;
+      stage.width = w; stage.height = h; overlay.width = w; overlay.height = h;
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      redrawAll();
+    }
+    // Reajusta cuando cambia el layout (barra lateral, resize, etc.)
+    new ResizeObserver(()=>{ lastX = null; lastY = null; fitCanvases(); }).observe(stage.parentElement);
+    window.addEventListener('resize', ()=>{ lastX = null; lastY = null; fitCanvases(); });
+
+    const lerp=(a,b,t)=>a+(b-a)*t; const dist=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+
+    const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    hands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.6, minTrackingConfidence:0.6 });
+    hands.onResults(onResults);
+
+    async function startCamera(){
+      if (running) return;
+      try{
+        fitCanvases();
+        cam = new Camera(video,{ onFrame:async()=>{ await hands.send({ image: video }); }, width:1280, height:720 });
+        await cam.start();
+        running = true;
+      }catch(err){ alert('No se pudo iniciar la cámara: '+err.message); console.error(err); }
+    }
+
+    // Controles UI
+    toggleSidebarBtn.addEventListener('click',()=>{ app.classList.toggle('collapsed'); setTimeout(fitCanvases, 0); });
+    smoothR.addEventListener('input',()=>{ smoothVal.textContent=Number(smoothR.value).toFixed(2); });
+    pinchR.addEventListener('input',()=>{ pinchVal.textContent=Number(pinchR.value).toFixed(3); });
+    colorPicker.addEventListener('input',()=>{ drawColor = colorPicker.value; });
+    widthRange.addEventListener('input',()=>{ drawWidth = Number(widthRange.value); widthVal.textContent = drawWidth; });
+
+    clearBtn.addEventListener('click',()=>{ strokes.length = 0; currentStroke = null; sctx.clearRect(0,0,stage.width,stage.height); });
+    undoBtn.addEventListener('click', undo);
+    startFab.addEventListener('click', startCamera);
+    whiteboardFab.addEventListener('click', ()=> setWhiteboard(!whiteboard));
+
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === 'Backspace'){
+        const t = e.target;
+        const isTyping = t && ((t.tagName === 'INPUT') || (t.tagName === 'TEXTAREA') || (t.isContentEditable));
+        if (!isTyping){ e.preventDefault(); undo(); }
+      }
+    });
+
+    function redrawAll(){
+      sctx.clearRect(0,0,stage.width,stage.height);
+      for (const st of strokes){
+        if (st.points.length<2) continue;
+        sctx.lineWidth = st.width; sctx.lineCap='round'; sctx.strokeStyle = st.color;
+        sctx.beginPath(); sctx.moveTo(st.points[0].x, st.points[0].y);
+        for (let i=1;i<st.points.length;i++){ sctx.lineTo(st.points[i].x, st.points[i].y); }
+        sctx.stroke();
+      }
+      if (currentStroke && currentStroke.points.length>1){
+        sctx.lineWidth = currentStroke.width; sctx.lineCap='round'; sctx.strokeStyle=currentStroke.color;
+        sctx.beginPath(); sctx.moveTo(currentStroke.points[0].x, currentStroke.points[0].y);
+        for (let i=1;i<currentStroke.points.length;i++){ sctx.lineTo(currentStroke.points[i].x, currentStroke.points[i].y); }
+        sctx.stroke();
+      }
+    }
+
+    function undo(){ if (strokes.length>0){ strokes.pop(); redrawAll(); } }
+    function setWhiteboard(on){
+      whiteboard = on;
+      stage.style.background = on ? '#fff' : 'transparent';
+      document.body.classList.toggle('whiteboard-on', on);
+      whiteboardFab.classList.toggle('active', on);
+      whiteboardFab.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+
+    function beginStroke(x,y){ currentStroke = { color: drawColor, width: drawWidth, points: [{x,y}] }; redrawAll(); }
+    function addPoint(x,y){ if (!currentStroke) return; const pts = currentStroke.points; const last = pts[pts.length-1]; if (!last || last.x!==x || last.y!==y){ pts.push({x,y}); } redrawAll(); }
+    function endStroke(){ if (currentStroke && currentStroke.points.length>0){ strokes.push(currentStroke); } currentStroke = null; redrawAll(); }
+
+    function onResults(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length===0){ endStroke(); return; }
+
+      const lm = results.multiHandLandmarks[0];
+
+      // Dimensiones del video mostrado (object-fit: cover)
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 720;
+      const cw = overlay.width, ch = overlay.height;
+      const scale = Math.max(cw / vw, ch / vh);
+      const dispW = vw * scale, dispH = vh * scale;
+      const offX = (cw - dispW) / 2;
+      const offY = (ch - dispH) / 2;
+
+      // Coordenadas normalizadas -> pantalla (considerando espejo y crop)
+      const nIx = lm[8].x, nIy = lm[8].y;
+      const nTx = lm[4].x, nTy = lm[4].y;
+
+      const ix = offX + (MIRROR ? (dispW * (1 - nIx)) : (dispW * nIx));
+      const iy = offY + (dispH * nIy);
+      const tx = offX + (MIRROR ? (dispW * (1 - nTx)) : (dispW * nTx));
+      const ty = offY + (dispH * nTy);
+
+      // Suavizado
+      if (lastX==null){ lastX=ix; lastY=iy; }
+      const smooth = Number(smoothR.value); lastX = lerp(lastX, ix, 1-smooth); lastY = lerp(lastY, iy, 1-smooth);
+      cursor.style.left = `${lastX}px`; cursor.style.top = `${lastY}px`;
+
+      // Detecta pellizco con umbral relativo al tamaño visible
+      const pinchThreshold = Number(pinchR.value) * Math.hypot(dispW, dispH);
+      const pinchDist = dist(ix, iy, tx, ty);
+      const isPinching = pinchDist < pinchThreshold;
+
+      // Click y dibujo: convertir a coords de ventana
+      const rect = overlay.getBoundingClientRect();
+      const clientX = rect.left + lastX;
+      const clientY = rect.top + lastY;
+
+      if (isPinching && !pinchDown){
+        pinchDown = true; cursor.classList.add('clicking');
+        const el = document.elementFromPoint(clientX, clientY);
+        if (el){ el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:clientX,clientY:clientY})); }
+        if (drawToggle.checked){ beginStroke(lastX,lastY); }
+      } else if (!isPinching && pinchDown){
+        pinchDown = false; cursor.classList.remove('clicking'); endStroke();
+      }
+
+      if (drawToggle.checked && pinchDown && currentStroke){ addPoint(lastX,lastY); }
+    }
+
+    // Estado inicial
+    smoothVal.textContent = Number(smoothR.value).toFixed(2);
+    pinchVal.textContent  = Number(pinchR.value).toFixed(3);
+    fitCanvases();
+  </script>
+</body>
+</html>
