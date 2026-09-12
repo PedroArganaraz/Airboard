@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pizarra Aérea</title>
+  <style>
+    :root{
+      --bg:#fef6ec;
+      --surface:#f8fafc;
+      --border:#e8e0d6;
+      --accent:#ef6c1e;
+      --accent2:#f68a3c;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --shadow: 0 8px 24px rgba(0,0,0,.06);
+      --scrollbar:#e9e2d8;
+      --scrollbarThumb:#f0a36f;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; color:var(--text);
+      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial;
+      background:
+        radial-gradient(1000px 600px at 80% -10%, rgba(246,138,60,.20) 0%, rgba(246,138,60,0) 60%),
+        var(--bg);
+      overflow:hidden;
+    }
+
+    /* ===== Layout ===== */
+    .app{
+      display:grid;
+      grid-template-columns:340px 1fr;
+      grid-template-rows:0 1fr;
+      grid-template-areas:"header header" "sidebar main";
+      height:100vh;
+      gap:12px; padding:12px;
+      transition: grid-template-columns .25s ease, gap .25s ease, padding .25s ease;
+    }
+    /* Colapsado: 1ª columna en 0, sin gap y sin padding izquierdo => no queda franja */
+    .app.collapsed{
+      grid-template-columns:0 1fr;
+      gap:0;
+      padding-left:12px;
+    }
+    .app.collapsed .sidebar{
+      width:0; padding:0; border:none; overflow:hidden;
+    }
+
+    header{ grid-area:header; height:0; padding:0; border:0; overflow:hidden }
+    header .sub{ color:var(--muted); font-size:12px }
+
+    /* ===== Sidebar ===== */
+    .sidebar{
+      grid-area:sidebar;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:16px; padding:16px;
+      display:grid; align-content:start; gap:14px;
+      overflow:auto; min-height:0;
+      box-shadow: var(--shadow);
+      overscroll-behavior:contain;
+    }
+    .sidebar::-webkit-scrollbar{ width:10px }
+    .sidebar::-webkit-scrollbar-track{ background:var(--scrollbar); border-radius:999px }
+    .sidebar::-webkit-scrollbar-thumb{ background:var(--scrollbarThumb); border-radius:999px }
+
+    .panel{
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:14px; box-shadow: var(--shadow);
+    }
+    .row{ display:flex; align-items:center; gap:10px }
+    .row+.row{ margin-top:10px }
+    label{ font-size:12px; color:#374151; font-weight:600 }
+    input[type="range"]{ width:100% }
+
+    /* ===== Botones ===== */
+    .btn{
+      appearance:none; border:none; cursor:pointer;
+      background:var(--accent); color:#fff; font-weight:700;
+      padding:10px 14px; border-radius:12px;
+      transition:transform .05s ease, box-shadow .2s ease, opacity .2s ease;
+      box-shadow:0 6px 20px rgba(239,108,30,.25);
+    }
+    .btn:hover{ opacity:.95 } .btn:active{ transform:translateY(1px) scale(.99) }
+    .ghost{ background:#fff; color:#1f2937; border:1px solid var(--border); box-shadow:none; font-weight:600 }
+
+    /* Botones “toggle” (estado) */
+    .seg{ display:flex; gap:8px }
+    .seg .tbtn{
+      flex:1; padding:10px 12px; border-radius:12px; border:1px solid var(--border);
+      background:#fff; color:#1f2937; font-weight:700; cursor:pointer; box-shadow:var(--shadow);
+      white-space:nowrap;
+    }
+    .seg .tbtn.on{ background:linear-gradient(90deg,var(--accent),var(--accent2)); color:#fff; border-color:transparent }
+
+    /* ===== Área principal ===== */
+    main{
+      grid-area:main; position:relative;
+      background:#000;             /* negro: cámara apagada */
+      border:1px solid transparent;
+      border-radius:16px; overflow:hidden; box-shadow: var(--shadow);
+    }
+
+    /* Toggle sidebar flotante */
+    #toggleSidebar{
+      position:absolute; left:10px; top:50%; transform:translateY(-50%); z-index:5;
+      background:rgba(255,255,255,.75); border:1px solid var(--border);
+      color:var(--text); border-radius:10px; padding:8px 10px; cursor:pointer;
+      backdrop-filter:blur(6px); box-shadow: var(--shadow);
+    }
+
+    /* Video y canvas (extendemos 1px para cubrir borde redondeado) */
+    #video{ position:absolute; inset:-1px; width:calc(100% + 2px); height:calc(100% + 2px); object-fit:cover; z-index:0; background:#000; transform:scaleX(-1); border-radius:inherit }
+    #stage{ position:absolute; inset:0; width:100%; height:100%; display:block; background:transparent; z-index:1; pointer-events:none }
+    #overlay{ position:absolute; inset:0; pointer-events:none; z-index:2 }
+
+    /* Cursor */
+    #cursor{
+      position:absolute; width:28px; height:28px; border-radius:50%;
+      backdrop-filter:blur(6px);
+      background:radial-gradient(circle at 35% 35%, rgba(255,255,255,.9), rgba(255,255,255,.1));
+      border:2px solid rgba(0,0,0,.15);
+      box-shadow:0 6px 20px rgba(239,108,30,.25);
+      transform:translate(-50%,-50%); pointer-events:none; z-index:3
+    }
+    #cursor.clicking{ animation:pulse .25s ease; border-color:var(--accent); box-shadow:0 0 0 6px rgba(239,108,30,.20) }
+    @keyframes pulse{ 0%{transform:translate(-50%,-50%) scale(1)} 50%{transform:translate(-50%,-50%) scale(.85)} 100%{transform:translate(-50%,-50%) scale(1)} }
+
+    /* Toggle ON/OFF (dibujar al pellizcar) */
+    .toggle{ display:inline-flex; gap:8px; align-items:center; cursor:pointer }
+    .toggle input{
+      appearance:none; width:42px; height:26px; border-radius:26px;
+      background:#e2e8f0;                 /* antes #f1f5f9 */
+      position:relative; outline:none; transition:background .2s ease;
+      border:1px solid #cbd5e1;           /* más marcado */
+    }
+    .toggle input::after{
+      content:""; position:absolute; width:20px; height:20px; border-radius:50%;
+      background:#94a3b8;                 /* knob más oscuro al estar OFF */
+      top:2px; left:2px; transition:transform .2s ease;
+      box-shadow:0 2px 4px rgba(0,0,0,.15);/* más contraste */
+    }
+    .toggle input:checked{ background:#ffe8d9; border-color:#ffd1b0 }
+    .toggle input:checked::after{ transform:translateX(16px); background:var(--accent) }
+
+    /* Pizarra ON: cursor negro */
+    body.whiteboard-on #cursor{
+      background:radial-gradient(circle at 35% 35%, rgba(0,0,0,.9), rgba(0,0,0,.2));
+      border:2px solid rgba(0,0,0,.6);
+      box-shadow:0 6px 20px rgba(0,0,0,.15)
+    }
+    body.whiteboard-on #cursor.clicking{ border-color:#000; box-shadow:0 0 0 6px rgba(0,0,0,.15) }
+
+    /* Tools (píldoras) */
+    .tools{ display:flex; gap:8px; flex-wrap:wrap }
+    .tool{
+      padding:8px 10px; border-radius:12px; border:1px solid var(--border);
+      background:#fff; color:#111827; cursor:pointer; font-weight:700;
+      user-select:none; box-shadow: var(--shadow);
+    }
+    .tool:hover{ background:#fff7f1 }
+    .tool.active{ background:linear-gradient(90deg,var(--accent),var(--accent2)); color:#fff; border-color:transparent }
+
+    /* Sliders naranjas */
+    input[type="range"]{
+      width:100%; height:6px; -webkit-appearance:none; appearance:none;
+      background:linear-gradient(to right, var(--accent) 0 var(--pct,50%), #e5e7eb var(--pct,50%) 100%);
+      border-radius:999px; outline:none;
+    }
+    input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance:none; appearance:none;
+      width:18px; height:18px; border-radius:50%; background:var(--accent);
+      border:2px solid #fff; box-shadow:0 2px 6px rgba(239,108,30,.35); cursor:pointer; margin-top:-6px;
+    }
+    input[type="range"]::-moz-range-thumb{
+      width:18px; height:18px; border-radius:50%; background:var(--accent);
+      border:2px solid #fff; box-shadow:0 2px 6px rgba(239,108,30,.35); cursor:pointer;
+    }
+    input[type="range"]::-moz-range-track{ height:6px; background:#e5e7eb; border-radius:999px }
+  </style>
+</head>
+<body>
+  <!-- Sidebar abierta por defecto -->
+  <div class="app" id="app">
+    <header>
+      <div>
+        <h1 style="margin:0;font-size:16px;font-weight:700">CamMouse</h1>
+        <div class="sub">Índice = cursor • Pellizco = clic • Vista espejo siempre ON</div>
+      </div>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <!-- 1) Sesión -->
+      <div class="panel">
+        <label style="display:block;margin-bottom:8px">Sesión</label>
+        <div class="seg">
+          <button id="camToggleBtn" class="tbtn" aria-pressed="false">Cámara: OFF</button>
+          <button id="wbToggleBtn"  class="tbtn" aria-pressed="false">Pizarra: OFF</button>
+        </div>
+      </div>
+
+      <!-- 2) Herramienta -->
+      <div class="panel">
+        <label style="display:block;margin-bottom:8px">Herramienta</label>
+        <div id="tools" class="tools">
+          <button type="button" class="tool active" data-tool="free"   title="Libre">✍️</button>
+          <button type="button" class="tool"        data-tool="line"   title="Línea">—</button>
+          <button type="button" class="tool"        data-tool="rect"   title="Rectángulo">▢</button>
+          <button type="button" class="tool"        data-tool="circle" title="Círculo">◯</button>
+        </div>
+      </div>
+
+      <!-- 3) Dibujo libre -->
+      <div class="panel">
+        <label class="toggle"><input id="drawToggle" type="checkbox" /><span>Dibujar al pellizcar</span></label>
+        <div class="row" style="justify-content:space-between;margin-top:10px">
+          <label>Color de trazo</label>
+          <input id="colorPicker" type="color" value="#ef6c1e" style="width:48px;height:28px;border:none;background:transparent;cursor:pointer" />
+        </div>
+        <div class="row" style="justify-content:space-between;margin-top:10px"><label>Grosor</label><span id="widthVal">10</span></div>
+        <input id="widthRange" type="range" min="1" max="24" step="1" value="10" />
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button id="undoBtn" class="btn ghost" style="flex:1">↶ Deshacer</button>
+          <button id="clearBtn" class="btn ghost" style="flex:1">🧹 Limpiar</button>
+        </div>
+      </div>
+
+      <!-- 4) Imagen de fondo -->
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <label>Imagen de fondo</label>
+          <span id="bgName" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button id="bgUploadBtn" class="btn" style="flex:1">Subir imagen</button>
+          <button id="bgClearBtn" class="btn ghost" style="flex:1">Quitar</button>
+          <input id="imgInput" type="file" accept="image/*" hidden />
+        </div>
+        <p style="margin:10px 0 0;color:var(--muted);font-size:12px">
+          La imagen se ajusta <b>sin recortar</b> (contain) y podés dibujar encima.
+        </p>
+      </div>
+
+      <!-- 5) Sensores -->
+      <div class="panel">
+        <div class="row" style="justify-content:space-between"><label>Suavizado del cursor</label><span id="smoothVal">0.65</span></div>
+        <input id="smooth" type="range" min="0" max="0.95" step="0.01" value="0.65" />
+        <div class="row" style="justify-content:space-between;margin-top:12px"><label>Umbral de pellizco</label><span id="pinchVal">0.020</span></div>
+        <input id="pinch" type="range" min="0.02" max="0.12" step="0.001" value="0.020" />
+      </div>
+    </aside>
+
+    <main>
+      <button id="toggleSidebar" title="Mostrar/ocultar panel">☰</button>
+
+      <video id="video" playsinline></video>
+      <canvas id="stage"></canvas>
+      <canvas id="overlay"></canvas>
+      <div id="cursor"></div>
+    </main>
+  </div>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // ====== Refs
+    const app = document.getElementById('app');
+    const toggleSidebarBtn = document.getElementById('toggleSidebar');
+
+    const video = document.getElementById('video');
+    const stage = document.getElementById('stage');
+    const overlay = document.getElementById('overlay');
+    const octx = overlay.getContext('2d');
+    const sctx = stage.getContext('2d');
+    const cursor = document.getElementById('cursor');
+
+    const camToggleBtn = document.getElementById('camToggleBtn');
+    const wbToggleBtn  = document.getElementById('wbToggleBtn');
+
+    const smoothR = document.getElementById('smooth');
+    const pinchR = document.getElementById('pinch');
+    const smoothVal = document.getElementById('smoothVal');
+    const pinchVal = document.getElementById('pinchVal');
+    const drawToggle = document.getElementById('drawToggle');
+    const clearBtn = document.getElementById('clearBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const colorPicker = document.getElementById('colorPicker');
+    const widthRange = document.getElementById('widthRange');
+    const widthVal = document.getElementById('widthVal');
+
+    const toolBtns = document.querySelectorAll('#tools .tool');
+
+    // Imagen de fondo
+    const imgInput = document.getElementById('imgInput');
+    const bgUploadBtn = document.getElementById('bgUploadBtn');
+    const bgClearBtn = document.getElementById('bgClearBtn');
+    const bgName = document.getElementById('bgName');
+    let bgImg = null, bgURL = null;
+
+    // ====== Estado
+    let cam; let running = false;
+    let lastX = null, lastY = null;
+    let pinchDown = false;
+    let currentStroke = null;
+    const strokes = [];
+    const MIRROR = true;
+    let drawColor = '#ef6c1e';
+    let drawWidth = 10;
+    let whiteboard = false;
+
+    let tool = 'free';     // 'free' | 'line' | 'rect' | 'circle'
+    let shapeStart = null;
+
+    // ====== Canvas sizing
+    function fitCanvases(){
+      const { clientWidth:w, clientHeight:h } = stage.parentElement;
+      stage.width = w; stage.height = h; overlay.width = w; overlay.height = h;
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      redrawAll();
+    }
+    new ResizeObserver(()=>{ lastX = null; lastY = null; fitCanvases(); }).observe(stage.parentElement);
+    window.addEventListener('resize', ()=>{ lastX = null; lastY = null; fitCanvases(); });
+
+    const lerp=(a,b,t)=>a+(b-a)*t;
+    const dist=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+
+    // ====== MediaPipe Hands
+    const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    hands.setOptions({ maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.6, minTrackingConfidence:0.6 });
+    hands.onResults(onResults);
+
+    async function startCamera(){
+      if (running) return;
+      try{
+        fitCanvases();
+        cam = new Camera(video,{ onFrame:async()=>{ await hands.send({ image: video }); }, width:1280, height:720 });
+        await cam.start();
+        running = true;
+        camToggleBtn.classList.add('on'); camToggleBtn.setAttribute('aria-pressed','true'); camToggleBtn.textContent='Cámara: ON';
+      }catch(err){ alert('No se pudo iniciar la cámara: '+err.message); console.error(err); }
+    }
+    function stopCamera(){
+      try{ if (cam && cam.stop) cam.stop(); }catch(_){}
+      const stream = video.srcObject;
+      if (stream && stream.getTracks){ stream.getTracks().forEach(t=>t.stop()); }
+      video.srcObject = null;
+      running = false;
+      camToggleBtn.classList.remove('on'); camToggleBtn.setAttribute('aria-pressed','false'); camToggleBtn.textContent='Cámara: OFF';
+    }
+
+    // ====== UI listeners
+    toggleSidebarBtn.addEventListener('click',()=>{
+      app.classList.toggle('collapsed');
+      setTimeout(fitCanvases, 0);
+    });
+
+    camToggleBtn.addEventListener('click', ()=>{ running ? stopCamera() : startCamera(); });
+    wbToggleBtn.addEventListener('click', ()=>{
+      setWhiteboard(!whiteboard);
+      wbToggleBtn.classList.toggle('on', whiteboard);
+      wbToggleBtn.setAttribute('aria-pressed', whiteboard ? 'true':'false');
+      wbToggleBtn.textContent = whiteboard ? 'Pizarra: ON' : 'Pizarra: OFF';
+    });
+
+    smoothR.addEventListener('input',()=>{ smoothVal.textContent=Number(smoothR.value).toFixed(2); styleRange(smoothR); });
+    pinchR.addEventListener('input',()=>{ pinchVal.textContent=Number(pinchR.value).toFixed(3); styleRange(pinchR); });
+    colorPicker.addEventListener('input',()=>{ drawColor = colorPicker.value; });
+    widthRange.addEventListener('input',()=>{ drawWidth = Number(widthRange.value); widthVal.textContent = drawWidth; styleRange(widthRange); });
+
+    clearBtn.addEventListener('click',()=>{ strokes.length = 0; currentStroke = null; redrawAll(); });
+    undoBtn.addEventListener('click', undo);
+
+    // Herramientas
+    function selectTool(name){
+      tool = name;
+      toolBtns.forEach(b => b.classList.toggle('active', b.dataset.tool === name));
+      shapeStart = null;
+      octx.clearRect(0,0,overlay.width, overlay.height);
+    }
+    toolBtns.forEach(btn => btn.addEventListener('click', () => selectTool(btn.dataset.tool)));
+
+    // Imagen de fondo
+    bgUploadBtn.addEventListener('click', ()=> imgInput.click());
+    imgInput.addEventListener('change', (e)=>{
+      const file = e.target.files?.[0];
+      if(!file) return;
+      if(bgURL) URL.revokeObjectURL(bgURL);
+      bgURL = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{ bgImg = img; bgName.textContent = file.name; stage.style.background = 'transparent'; redrawAll(); };
+      img.src = bgURL;
+    });
+    bgClearBtn.addEventListener('click', ()=>{
+      if(bgURL){ URL.revokeObjectURL(bgURL); bgURL = null; }
+      bgImg = null; bgName.textContent = '';
+      stage.style.background = whiteboard ? '#fff' : 'transparent';
+      redrawAll();
+    });
+
+    // Sliders: progreso naranja
+    function styleRange(el){
+      const min = +el.min || 0, max = +el.max || 100, val = +el.value;
+      const pct = ((val - min) / (max - min)) * 100;
+      el.style.setProperty('--pct', pct + '%');
+    }
+    [smoothR, pinchR, widthRange].forEach(el => { styleRange(el); });
+
+    // ====== Dibujo / formas
+    function redrawAll(){
+      sctx.clearRect(0,0,stage.width,stage.height);
+      if (bgImg){
+        sctx.fillStyle = '#fff'; sctx.fillRect(0,0,stage.width,stage.height);
+        const cw = stage.width, ch = stage.height;
+        const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
+        const scale = Math.min(cw/iw, ch/ih);         // CONTAIN
+        const dw = iw*scale, dh = ih*scale;
+        const dx = (cw - dw)/2, dy = (ch - dh)/2;
+        sctx.drawImage(bgImg, dx, dy, dw, dh);
+      } else if (whiteboard){
+        sctx.fillStyle = '#fff'; sctx.fillRect(0,0,stage.width,stage.height);
+      }
+
+      for (const st of strokes){
+        sctx.lineCap = 'round';
+        sctx.lineWidth = st.width ?? drawWidth;
+        sctx.strokeStyle = st.color ?? drawColor;
+        switch(st.kind || 'path'){
+          case 'path': {
+            if (!st.points || st.points.length<2) break;
+            sctx.beginPath();
+            sctx.moveTo(st.points[0].x, st.points[0].y);
+            for (let i=1;i<st.points.length;i++){ sctx.lineTo(st.points[i].x, st.points[i].y); }
+            sctx.stroke(); break;
+          }
+          case 'line': {
+            sctx.beginPath(); sctx.moveTo(st.x1, st.y1); sctx.lineTo(st.x2, st.y2); sctx.stroke(); break;
+          }
+          case 'rect': {
+            const x = Math.min(st.x1, st.x2), y = Math.min(st.y1, st.y2);
+            const w = Math.abs(st.x2 - st.x1), h = Math.abs(st.y2 - st.y1);
+            sctx.strokeRect(x, y, w, h); break;
+          }
+          case 'circle': {
+            sctx.beginPath(); sctx.arc(st.cx, st.cy, st.r, 0, Math.PI*2); sctx.stroke(); break;
+          }
+        }
+      }
+
+      if (currentStroke && currentStroke.kind === 'path' && currentStroke.points.length>1){
+        sctx.lineWidth = currentStroke.width; sctx.lineCap='round'; sctx.strokeStyle=currentStroke.color;
+        sctx.beginPath(); sctx.moveTo(currentStroke.points[0].x, currentStroke.points[0].y);
+        for (let i=1;i<currentStroke.points.length;i++){ sctx.lineTo(currentStroke.points[i].x, currentStroke.points[i].y); }
+        sctx.stroke();
+      }
+    }
+
+    function undo(){ if (strokes.length>0){ strokes.pop(); redrawAll(); } }
+
+    function setWhiteboard(on){
+      whiteboard = on;
+      if(!bgImg){ stage.style.background = on ? '#fff' : 'transparent'; }
+      document.body.classList.toggle('whiteboard-on', on);
+      redrawAll();
+    }
+
+    // Libre
+    function beginStroke(x,y){ currentStroke = { kind:'path', color: drawColor, width: drawWidth, points: [{x,y}] }; redrawAll(); }
+    function addPoint(x,y){ if (!currentStroke) return; const pts = currentStroke.points; const last = pts[pts.length-1]; if (!last || last.x!==x || last.y!==y){ pts.push({x,y}); } redrawAll(); }
+    function endStroke(){ if (currentStroke && currentStroke.points.length>0){ strokes.push(currentStroke); } currentStroke = null; redrawAll(); }
+
+    // Preview + commit de formas (solo si toggle ON)
+    function drawLine(ctx,x1,y1,x2,y2){ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+    function drawRect(ctx,x1,y1,x2,y2){ const x=Math.min(x1,x2), y=Math.min(y1,y2), w=Math.abs(x2-x1), h=Math.abs(y2-y1); ctx.strokeRect(x,y,w,h); }
+    function drawCircle(ctx,x1,y1,x2,y2){ const r=Math.hypot(x2-x1,y2-y1); ctx.beginPath(); ctx.arc(x1,y1,r,0,Math.PI*2); ctx.stroke(); }
+
+    function drawPreview(){
+      if (!drawToggle.checked || !shapeStart || tool === 'free') return;
+      octx.save();
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      octx.setLineDash([8,6]);
+      octx.lineWidth = drawWidth;
+      octx.strokeStyle = drawColor;
+      if (tool === 'line')   drawLine(octx, shapeStart.x, shapeStart.y, lastX, lastY);
+      if (tool === 'rect')   drawRect(octx, shapeStart.x, shapeStart.y, lastX, lastY);
+      if (tool === 'circle') drawCircle(octx, shapeStart.x, shapeStart.y, lastX, lastY);
+      octx.restore();
+    }
+
+    function commitShape(a, b){
+      if (!drawToggle.checked) return;
+      if (tool === 'line'){
+        strokes.push({ kind:'line', color:drawColor, width:drawWidth, x1:a.x, y1:a.y, x2:b.x, y2:b.y });
+      } else if (tool === 'rect'){
+        strokes.push({ kind:'rect', color:drawColor, width:drawWidth, x1:a.x, y1:a.y, x2:b.x, y2:b.y });
+      } else if (tool === 'circle'){
+        const r = Math.hypot(b.x-a.x, b.y-a.y);
+        strokes.push({ kind:'circle', color:drawColor, width:drawWidth, cx:a.x, cy:a.y, r });
+      }
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      redrawAll();
+    }
+
+    // ====== Gestos
+    function onResults(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length===0){
+        endStroke(); return;
+      }
+
+      const lm = results.multiHandLandmarks[0];
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 720;
+      const cw = overlay.width, ch = overlay.height;
+      const scale = Math.max(cw / vw, ch / vh);
+      const dispW = vw * scale, dispH = vh * scale;
+      const offX = (cw - dispW) / 2, offY = (ch - dispH) / 2;
+
+      const nIx = lm[8].x, nIy = lm[8].y;
+      const nTx = lm[4].x, nTy = lm[4].y;
+
+      const ix = offX + (dispW * (1 - nIx));
+      const iy = offY + (dispH * nIy);
+      const tx = offX + (dispW * (1 - nTx));
+      const ty = offY + (dispH * nTy);
+
+      if (lastX==null){ lastX=ix; lastY=iy; }
+      const smooth = Number(smoothR.value); lastX = lerp(lastX, ix, 1-smooth); lastY = lerp(lastY, iy, 1-smooth);
+      cursor.style.left = `${lastX}px`; cursor.style.top = `${lastY}px`;
+
+      const pinchThreshold = Number(pinchR.value) * Math.hypot(dispW, dispH);
+      const pinchDist = dist(ix, iy, tx, ty);
+      const isPinching = pinchDist < pinchThreshold;
+
+      if (isPinching && !pinchDown){
+        pinchDown = true; cursor.classList.add('clicking');
+
+        if (!drawToggle.checked){
+          // "clic" de UI
+          const rect = overlay.getBoundingClientRect();
+          const clientX = rect.left + lastX;
+          const clientY = rect.top + lastY;
+          const el = document.elementFromPoint(clientX, clientY);
+          if (el){ el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX,clientY})); }
+        } else {
+          // Dibujo
+          if (tool === 'free'){
+            beginStroke(lastX,lastY);
+          } else {
+            if (!shapeStart){ shapeStart = { x:lastX, y:lastY }; }
+            else { commitShape(shapeStart, { x:lastX, y:lastY }); shapeStart = null; }
+          }
+        }
+
+      } else if (!isPinching && pinchDown){
+        pinchDown = false; cursor.classList.remove('clicking');
+        if (drawToggle.checked && tool === 'free'){ endStroke(); }
+      }
+
+      if (drawToggle.checked && tool === 'free' && pinchDown && currentStroke){ addPoint(lastX,lastY); }
+      drawPreview();
+    }
+
+    // Atajos teclado: Backspace / Delete = undo
+    window.addEventListener('keydown', (e)=>{
+      const t = e.target;
+      const typing = t && ((t.tagName === 'INPUT') || (t.tagName === 'TEXTAREA') || (t.isContentEditable));
+      if (typing) return;
+      if (e.key === 'Backspace' || e.key === 'Delete'){ e.preventDefault(); undo(); }
+    });
+
+    // Estado inicial
+    selectTool('free');
+    smoothVal.textContent = Number(smoothR.value).toFixed(2);
+    pinchVal.textContent  = Number(pinchR.value).toFixed(3);
+    fitCanvases();
+  </script>
+</body>
+</html>
