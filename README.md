@@ -1,13 +1,14 @@
-# Airboard
+# Air Whiteboard
 
-Pizarra aérea que corre 100% en el navegador.
+A hand-tracking whiteboard that runs 100% in the browser.
 
-Usa tu índice para mover un cursor virtual y el pellizco (pulgar+índice) para hacer clic o dibujar. La cámara se muestra en modo espejo.
+Use your index finger to move a virtual cursor, and pinch (thumb + index) to click or draw. The camera feed is shown mirrored.
 
-Incluye modo Pizarra (fondo blanco), selector de color y grosor ajustable.
+## Features
+- Whiteboard mode (white background)
+- Color picker
+- Adjustable stroke thickness
 
-## Ajustes recomendados
-- Suavizado del cursor: **0.65**
-- Umbral de pellizco: **0.020**
-
-
+## Recommended settings
+- Cursor smoothing: 0.65
+- Pinch threshold: 0.020
