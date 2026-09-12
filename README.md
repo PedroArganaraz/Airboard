@@ -1,4 +1,4 @@
-# Air Whiteboard
+# Airboard
 
 A hand-tracking whiteboard that runs 100% in the browser.
 
